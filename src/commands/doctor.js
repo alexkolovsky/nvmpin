@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { versionsDir, versionPath } from '../nvm.js';
+import { versionsDir, versionPath, binDir } from '../nvm.js';
 import { shimDir, pinsPath, loadRegistry, listCorruptBackups } from '../registry.js';
 import { listShims, parseShim } from '../shims.js';
 
@@ -9,6 +9,7 @@ import { listShims, parseShim } from '../shims.js';
 export default async function doctor(ctx) {
   const { ui } = ctx;
   const problems = [];
+  const notes = [];
   const problem = (msg, fix) => problems.push({ msg, fix });
 
   const dir = shimDir(ctx.home);
@@ -18,23 +19,7 @@ export default async function doctor(ctx) {
     problem(`shim directory ${dir} does not exist`, 'run `nvmpin setup`.');
   }
 
-  // 2. PATH ordering: shim dir must come before every nvm bin path
-  const pathEntries = (ctx.env.PATH || '').split(':').filter(Boolean);
-  const shimIdx = pathEntries.findIndex((p) => path.resolve(p) === path.resolve(dir));
-  const nvmVersions = path.resolve(versionsDir(ctx.nvmDir));
-  const nvmIdxs = pathEntries
-    .map((p, i) => (path.resolve(p).startsWith(nvmVersions + path.sep) ? i : -1))
-    .filter((i) => i !== -1);
-  if (shimIdx === -1) {
-    problem(`${dir} is not in PATH`, 'run `nvmpin setup` and add the printed line to your shell rc.');
-  } else if (nvmIdxs.some((i) => i < shimIdx)) {
-    problem(
-      `${dir} appears in PATH after an nvm bin directory — nvm-managed bins will win over shims`,
-      "move the nvmpin PATH export below (after) nvm's init lines in your shell rc so it is prepended last."
-    );
-  }
-
-  // 3. pins.json parses and is schema-valid. Doctor is read-only: a corrupt
+  // 2. pins.json parses and is schema-valid. Doctor is read-only: a corrupt
   // file is reported as a finding (and the remaining checks run against an
   // in-memory empty registry) — never backed up or wiped from here.
   const { registry, corrupt } = loadRegistry(ctx.home, { readonly: true });
@@ -43,6 +28,57 @@ export default async function doctor(ctx) {
       `pins.json is corrupt or schema-invalid: ${pinsPath(ctx.home)}`,
       'fix the file by hand, or run any write command (add/remove/move) to back it up and start fresh.'
     );
+  }
+
+  // 3. PATH check, three tiers. `nvm use` prepends the chosen version's bin
+  // dir to PATH in the live shell — always, unavoidably — so "an nvm dir
+  // precedes the shim dir" is not by itself an error. It is only a problem
+  // when a pinned bin name actually exists in such an earlier dir (real
+  // shadowing); otherwise it earns an informational note, because the thing
+  // that matters — rc ordering — can only be judged in a fresh shell.
+  const pathEntries = (ctx.env.PATH || '').split(':').filter(Boolean);
+  const shimIdx = pathEntries.findIndex((p) => path.resolve(p) === path.resolve(dir));
+  const nvmVersions = path.resolve(versionsDir(ctx.nvmDir));
+  const isNvmVersionBin = (p) => {
+    const rel = path.relative(nvmVersions, p);
+    const parts = rel.split(path.sep);
+    return !rel.startsWith('..') && parts.length === 2 && parts[1] === 'bin';
+  };
+  if (shimIdx === -1) {
+    problem(`${dir} is not in PATH`, 'run `nvmpin setup` and add the printed line to your shell rc.');
+  } else {
+    const earlierNvmBins = [
+      ...new Set(pathEntries.slice(0, shimIdx).map((p) => path.resolve(p)).filter(isNvmVersionBin)),
+    ];
+    if (earlierNvmBins.length > 0) {
+      let shadowingFound = false;
+      for (const [pkg, pin] of Object.entries(registry.pins)) {
+        const ownBinDir = path.resolve(binDir(ctx.nvmDir, pin.node));
+        for (const earlier of earlierNvmBins) {
+          // The pin's own target version earlier in PATH resolves to the
+          // same node + script either way — not shadowing.
+          if (earlier === ownBinDir) continue;
+          const shadowed = pin.bins.filter((b) => fs.existsSync(path.join(earlier, b)));
+          if (shadowed.length > 0) {
+            shadowingFound = true;
+            problem(
+              `bin${shadowed.length > 1 ? 's' : ''} ${shadowed.map((b) => `"${b}"`).join(', ')} of ${pkg} ` +
+                `(pinned to ${pin.node}) ${shadowed.length > 1 ? 'are' : 'is'} shadowed by ${earlier}, ` +
+                `which comes before the shim dir in PATH`,
+              "either the rc ordering is wrong (nvmpin's PATH line must come after nvm's init lines), " +
+                'or the currently `nvm use`d version has a conflicting global install — run `nvmpin scan` to see duplicates.'
+            );
+          }
+        }
+      }
+      if (!shadowingFound) {
+        notes.push(
+          'nvm bin dir(s) precede the shim dir in PATH. This is expected inside a shell after `nvm use` ' +
+            'and no pinned bin is currently shadowed. To verify the rc ordering that new shells will get, ' +
+            'run doctor in a fresh shell.'
+        );
+      }
+    }
   }
 
   // 4. every registry entry's node version still exists, shims match
@@ -92,13 +128,18 @@ export default async function doctor(ctx) {
 
   if (problems.length === 0) {
     ui.print(ui.green('doctor: all checks passed.'));
-    return 0;
+  } else {
+    ui.print(ui.red(`doctor: ${problems.length} problem(s) found`));
+    for (const p of problems) {
+      ui.print('');
+      ui.print(`  ${ui.red('✗')} ${p.msg}`);
+      ui.print(`    ${ui.dim('fix:')} ${p.fix}`);
+    }
   }
-  ui.print(ui.red(`doctor: ${problems.length} problem(s) found`));
-  for (const p of problems) {
+  // Notes are informational only: no ✗, not counted, never affect exit code.
+  for (const n of notes) {
     ui.print('');
-    ui.print(`  ${ui.red('✗')} ${p.msg}`);
-    ui.print(`    ${ui.dim('fix:')} ${p.fix}`);
+    ui.print(`  ${ui.dim('note:')} ${n}`);
   }
-  return 2;
+  return problems.length === 0 ? 0 : 2;
 }

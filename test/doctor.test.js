@@ -93,15 +93,88 @@ test('doctor: detects shim drift (shim disagrees with registry)', async () => {
   }
 });
 
-test('doctor: detects PATH ordering problem (nvm bin before shim dir)', async () => {
-  const fx = makeFixture(['v18.20.4']);
+// --- three-tier PATH check (decision 18) ---
+
+test('doctor PATH tier: shim dir first → exit 0, no note (regression)', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
   try {
     await pinTool(fx);
-    const nvmBin = path.join(fx.nvmDir, 'versions', 'node', 'v18.20.4', 'bin');
     const ui = makeUiStub();
-    const code = await doctor(makeCtx(fx, { ui, PATH: `${nvmBin}:${shimDir(fx.home)}:/usr/bin` }));
+    const code = await doctor(makeCtx(fx, { ui })); // goodPath: shim dir first
+    assert.equal(code, 0);
+    assert.ok(!ui.lines.some((l) => l.includes('note:')), 'no note when shim dir is first');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor PATH tier: nvm dir precedes shim dir, no name overlap → exit 0 with note', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await pinTool(fx); // pinned to v18.20.4; v20.11.1/bin holds only fake node+npm
+    const otherBin = path.join(fx.nvmDir, 'versions', 'node', 'v20.11.1', 'bin');
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui, PATH: `${otherBin}:${shimDir(fx.home)}:/usr/bin` }));
+    assert.equal(code, 0, ui.lines.join('\n'));
+    const out = ui.lines.join('\n');
+    assert.match(out, /all checks passed/);
+    assert.match(out, /note:.*expected inside a shell after `nvm use`/);
+    assert.match(out, /fresh shell/);
+    assert.ok(!out.includes('✗'), 'notes carry no ✗');
+    assert.ok(!out.includes('problem(s) found'), 'notes are not counted as problems');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor PATH tier: earlier non-target nvm dir shadows a pinned bin → exit 2 naming bin, dir, version', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await pinTool(fx); // tool pinned to v18.20.4
+    const otherBin = path.join(fx.nvmDir, 'versions', 'node', 'v20.11.1', 'bin');
+    fs.writeFileSync(path.join(otherBin, 'tool'), '#!/bin/sh\n', { mode: 0o755 }); // conflicting global
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui, PATH: `${otherBin}:${shimDir(fx.home)}:/usr/bin` }));
     assert.equal(code, 2);
-    assert.ok(ui.lines.some((l) => l.includes('after an nvm bin directory')));
+    const out = ui.lines.join('\n');
+    assert.match(out, /"tool".*pinned to v18\.20\.4.*shadowed by/);
+    assert.ok(out.includes(otherBin), 'finding names the shadowing directory');
+    assert.match(out, /nvmpin scan/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("doctor PATH tier: earlier dir is the pin's own target bin → exempt, exit 0 with note", async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await pinTool(fx);
+    const ownBin = path.join(fx.nvmDir, 'versions', 'node', 'v18.20.4', 'bin');
+    // even with a same-named file present, the own-target dir is not shadowing
+    fs.writeFileSync(path.join(ownBin, 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui, PATH: `${ownBin}:${shimDir(fx.home)}:/usr/bin` }));
+    assert.equal(code, 0, ui.lines.join('\n'));
+    assert.ok(ui.lines.some((l) => l.includes('note:')), 'tier-3 note still shown (dir still precedes)');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor PATH tier: two pins, one shadowed → exit 2, exactly one finding, only the shadowed one', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await pinTool(fx, 'tool');
+    await pinTool(fx, 'other');
+    const otherBin = path.join(fx.nvmDir, 'versions', 'node', 'v20.11.1', 'bin');
+    fs.writeFileSync(path.join(otherBin, 'tool'), '#!/bin/sh\n', { mode: 0o755 });
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui, PATH: `${otherBin}:${shimDir(fx.home)}:/usr/bin` }));
+    assert.equal(code, 2);
+    const out = ui.lines.join('\n');
+    assert.match(out, /doctor: 1 problem\(s\) found/);
+    assert.match(out, /"tool"/);
+    assert.ok(!/"other".*shadowed/.test(out), 'unshadowed pin not reported');
   } finally {
     fx.cleanup();
   }

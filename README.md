@@ -60,7 +60,7 @@ $ nvmpin doctor                        # verify PATH order, shims, registry
 | `nvmpin list [--json]` | Table of pins: package, node version, bins, status (`ok` / `broken shim` / `node version missing`). |
 | `nvmpin scan [--json]` | Walk all installed nvm versions' global trees; report each package, which versions it exists in, duplicates, and unpinned candidates (npm/corepack excluded). |
 | `nvmpin exec <pkg> -- <args...>` | Run a pinned package's main bin directly with its pinned node — an escape hatch that bypasses PATH/shims. |
-| `nvmpin doctor` | Verify: shim dir on PATH *before* all nvm bin dirs, every pinned node version still installed, shims match the registry (no orphans, no drift), pins.json valid. Exits non-zero with fix suggestions when problems are found. |
+| `nvmpin doctor` | Verify: shim dir on PATH and no pinned bin *shadowed* by an earlier nvm bin dir, every pinned node version still installed, shims match the registry (no orphans, no drift), pins.json valid. Exits `2` with fix suggestions on findings. Doctor distinguishes **findings** (`✗`, exit 2) from **notes** (informational, exit 0): after `nvm use`, that version's bin dir precedes the shims in the live shell — expected and harmless unless it actually contains a pinned bin's name, so doctor prints a note instead of failing. To judge your rc ordering, run doctor in a fresh shell. |
 
 **Global flags:** `--yes` (skip confirmations), `--no-color` (also respects `NO_COLOR`), `--json` (on `list` and `scan`), `--help`/`-h`.
 
