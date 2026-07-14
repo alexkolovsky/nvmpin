@@ -1,0 +1,31 @@
+{
+  "name": "nvmpin",
+  "version": "1.0.0",
+  "description": "Pin globally-installed npm packages to specific nvm-managed Node versions via shims, so CLIs keep working regardless of which node version is active.",
+  "type": "module",
+  "bin": {
+    "nvmpin": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE-MIT"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  },
+  "keywords": [
+    "nvm",
+    "node",
+    "version",
+    "global",
+    "cli",
+    "shim",
+    "pin"
+  ],
+  "author": "Alex Kolovskiy",
+  "license": "MIT"
+}
