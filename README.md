@@ -100,4 +100,4 @@ Because `~/.nvmpin/bin` sits ahead of nvm's bin dir in PATH, the shim wins no ma
 
 ## License
 
-MIT — see [LICENSE-MIT](LICENSE-MIT).
+MIT — see [LICENSE](LICENSE).

@@ -76,6 +76,25 @@ test('add: warns on engines.node conflict but proceeds', async () => {
   }
 });
 
+test('add: explicit --node with unparseable engines range warns "couldn\'t verify"', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    installFakePackage(fx.nvmDir, 'v18.20.4', 'weird', {
+      bin: { weird: 'cli.js' },
+      engines: { node: '>=18.0.0-rc.1' }, // prerelease comparator: unsupported syntax
+    });
+    const ui = makeUiStub();
+    const code = await add(makeCtx(fx, { flags: { node: '18' }, ui }), ['weird']);
+    assert.equal(code, 0, 'unverifiable range never blocks');
+    assert.ok(
+      ui.errors.some((l) => l.includes("couldn't verify engines compatibility")),
+      `expected a couldn't-verify warning, got: ${ui.errors.join('\n')}`
+    );
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test('add: without --node suggests a version from engines.node', async () => {
   const fx = makeFixture(['v18.20.4', 'v20.11.1']);
   try {

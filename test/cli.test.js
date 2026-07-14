@@ -134,16 +134,37 @@ test('cli: doctor exits 2 on problems, 0 when healthy', () => {
   }
 });
 
-test('cli: setup is idempotent and prints the rc snippet', () => {
+test('cli: setup appends once to zsh rc and is idempotent on re-run', () => {
   const fx = makeFixture();
   try {
-    // HOME rc file untouched: run non-interactively (no TTY -> confirm=false)
-    const r = run(fx, ['setup']);
+    // Sandbox HOME so the real rc files are never touched.
+    const env = { HOME: fx.root, SHELL: '/bin/zsh' };
+    const r = run(fx, ['setup', '--yes'], env);
     assert.equal(r.status, 0);
     assert.match(r.stdout, /export PATH=/);
-    assert.match(r.stdout, /nvmpin/);
-    const r2 = run(fx, ['setup']);
+    const rc = fs.readFileSync(path.join(fx.root, '.zshrc'), 'utf8');
+    assert.match(rc, /# nvmpin/);
+
+    const r2 = run(fx, ['setup', '--yes'], env);
     assert.equal(r2.status, 0);
+    assert.match(r2.stdout, /already contains/);
+    const rc2 = fs.readFileSync(path.join(fx.root, '.zshrc'), 'utf8');
+    assert.equal(rc2, rc, 'no second append');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('cli: setup never appends for unknown shells, prints manual note', () => {
+  const fx = makeFixture();
+  try {
+    const env = { HOME: fx.root, SHELL: '/usr/local/bin/fish' };
+    const r = run(fx, ['setup', '--yes'], env);
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /not bash or zsh/);
+    assert.match(r.stdout, /export PATH=/, 'snippet still printed');
+    assert.ok(!fs.existsSync(path.join(fx.root, '.bashrc')), 'no bash syntax written for fish');
+    assert.ok(!fs.existsSync(path.join(fx.root, '.zshrc')));
   } finally {
     fx.cleanup();
   }

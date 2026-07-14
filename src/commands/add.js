@@ -20,12 +20,18 @@ function suggestVersion(ctx, pkgName, installed) {
   return undefined;
 }
 
-function checkEngines(ctx, pkgName, version) {
+function checkEngines(ctx, pkgName, version, { explicit }) {
   const manifest = readInstalledManifest(ctx.nvmDir, version, pkgName);
   const range = manifest?.engines?.node;
-  if (range && satisfies(version, range) === false) {
+  if (!range) return;
+  const result = satisfies(version, range);
+  if (result === false) {
     ctx.ui.warn(
       `${pkgName} declares engines.node "${range}" which node ${version} does not satisfy — proceeding anyway.`
+    );
+  } else if (result === null && explicit) {
+    ctx.ui.warn(
+      `couldn't verify engines compatibility: ${pkgName} declares engines.node "${range}", which nvmpin's range matcher doesn't understand.`
     );
   }
 }
@@ -71,7 +77,7 @@ export default async function add(ctx, args) {
     ui.warn(`${pkgName} is already installed under ${nodeVersion}; the @${pkgVersion} spec was ignored.`);
   }
 
-  checkEngines(ctx, pkgName, nodeVersion);
+  checkEngines(ctx, pkgName, nodeVersion, { explicit: Boolean(ctx.flags.node) });
 
   const bins = readBins(ctx.nvmDir, nodeVersion, pkgName);
 

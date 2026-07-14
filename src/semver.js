@@ -64,7 +64,10 @@ function satisfiesComparator(ver, comp) {
 export function satisfies(version, range) {
   const ver = parseVersion(version);
   if (!ver) return null;
-  const orGroups = String(range).split('||');
+  // npm allows whitespace between operator and version (">= 4") — attach it
+  // before splitting comparators on whitespace.
+  const normalized = String(range).replace(/(>=|<=|>|<|\^|~|=)\s+/g, '$1');
+  const orGroups = normalized.split('||');
   let sawParseable = false;
   for (const group of orGroups) {
     const comps = group.trim().split(/\s+/).filter(Boolean);

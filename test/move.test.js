@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import add from '../src/commands/add.js';
 import move from '../src/commands/move.js';
+import doctor from '../src/commands/doctor.js';
 import { loadRegistry, shimDir } from '../src/registry.js';
-import { parseShim } from '../src/shims.js';
+import { parseShim, readBins, writeShims, removeShims } from '../src/shims.js';
 import { makeFixture, installFakePackage, makeUiStub } from './fixtures/helpers.js';
 
 function makeCtx(fx, { flags = {}, installer, ui } = {}) {
@@ -86,6 +87,63 @@ test('move: rolls back when shim generation fails after install (no bin field)',
     await assert.rejects(() => move(makeCtx(fx, { flags: { node: '20' }, installer }), ['tool']));
     const { registry } = loadRegistry(fx.home);
     assert.equal(registry.pins.tool.node, 'v18.20.4');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('move: failure AFTER old shims were removed rolls back to a state doctor calls clean', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await setupPinned(fx);
+    const installer = {
+      isInstalled: () => true,
+      install: (nvmDir, version) =>
+        installFakePackage(nvmDir, version, 'tool', { bin: { tool: 'cli.js' }, version: '3.1.4' }),
+    };
+    // Fail writing the NEW shims (after removeShims already ran), succeed
+    // for the rollback's re-create of the old ones — a transient fs failure.
+    let writeCalls = 0;
+    const shimOps = {
+      readBins,
+      removeShims,
+      writeShims: (...a) => {
+        writeCalls += 1;
+        if (writeCalls === 1) throw new Error('disk hiccup');
+        return writeShims(...a);
+      },
+    };
+    const ctx = makeCtx(fx, { flags: { node: '20' }, installer });
+    ctx.shimOps = shimOps;
+    await assert.rejects(() => move(ctx, ['tool']), /disk hiccup/);
+
+    // Invariant: registry restored AND shims restored — doctor sees nothing wrong.
+    const { registry } = loadRegistry(fx.home);
+    assert.equal(registry.pins.tool.node, 'v18.20.4');
+    assert.deepEqual(parseShim(path.join(shimDir(fx.home), 'tool')), { pkg: 'tool', version: 'v18.20.4' });
+    const goodPath = `${shimDir(fx.home)}:${path.join(fx.nvmDir, 'versions/node/v18.20.4/bin')}:/usr/bin`;
+    const docCtx = makeCtx(fx);
+    docCtx.env = { PATH: goodPath };
+    assert.equal(await doctor(docCtx), 0, 'doctor is clean after rolled-back move');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('move: install failure of a preserved version explains what was attempted', async () => {
+  const fx = makeFixture(['v18.20.4', 'v20.11.1']);
+  try {
+    await setupPinned(fx); // installed version 3.1.4 — move will pin tool@3.1.4
+    const installer = {
+      isInstalled: () => true,
+      install: () => { throw new Error('E404 no matching version'); },
+    };
+    const ui = makeUiStub();
+    await assert.rejects(() => move(makeCtx(fx, { flags: { node: '20' }, installer, ui }), ['tool']));
+    assert.ok(
+      ui.errors.some((l) => l.includes('tried to preserve your installed version (tool@3.1.4)')),
+      `expected preservation hint, got: ${ui.errors.join('\n')}`
+    );
   } finally {
     fx.cleanup();
   }

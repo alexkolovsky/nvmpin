@@ -28,6 +28,7 @@ export default async function move(ctx, args) {
   }
 
   const installer = ctx.installer ?? createInstaller();
+  const shimOps = ctx.shimOps ?? { readBins, writeShims, removeShims };
   const snapshot = structuredClone(registry);
   const oldBins = pin.bins;
 
@@ -38,9 +39,9 @@ export default async function move(ctx, args) {
   try {
     ui.print(`installing ${spec} under node ${target}...`);
     installer.install(ctx.nvmDir, target, spec);
-    const bins = readBins(ctx.nvmDir, target, pkg);
-    removeShims(ctx.home, oldBins);
-    const written = writeShims(ctx.home, ctx.nvmDir, pkg, target, bins);
+    const bins = shimOps.readBins(ctx.nvmDir, target, pkg);
+    shimOps.removeShims(ctx.home, oldBins);
+    const written = shimOps.writeShims(ctx.home, ctx.nvmDir, pkg, target, bins);
     registry.pins[pkg] = { node: target, bins: written, pinnedAt: new Date().toISOString() };
     saveRegistry(ctx.home, registry);
     ui.print(`${ui.green('moved')} ${pkg}: ${pin.node} -> ${target} (bins: ${written.join(', ')})`);
@@ -55,6 +56,13 @@ export default async function move(ctx, args) {
       // old tree unreadable — registry restore is the best we can do
     }
     ui.error(`move failed — pin for ${pkg} left on ${pin.node}.`);
+    if (spec !== pkg) {
+      ui.hint(
+        `the move tried to preserve your installed version (${spec}); that exact version may be ` +
+          `unavailable or incompatible with node ${target}. To move to the latest version instead: ` +
+          `nvmpin remove ${pkg} && nvmpin add ${pkg} --node ${target.replace(/^v/, '')}`
+      );
+    }
     throw err;
   }
   return 0;

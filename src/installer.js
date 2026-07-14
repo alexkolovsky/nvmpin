@@ -16,9 +16,16 @@ function runNpm(nvmDir, version, npmArgs, { stdio = 'inherit' } = {}) {
       `try reinstalling it: nvm install ${version.replace(/^v/, '')}`
     );
   }
+  // npm resolves `node` for lifecycle scripts (postinstall, node-gyp) from
+  // PATH, not from the node that launched npm — prepend the target version's
+  // bin dir so native builds compile against the right ABI.
   const result = spawnSync(nodeBin, [npmBin, ...npmArgs], {
     stdio,
-    env: { ...process.env, npm_config_prefix: undefined },
+    env: {
+      ...process.env,
+      PATH: `${binDir(nvmDir, version)}:${process.env.PATH || ''}`,
+      npm_config_prefix: undefined,
+    },
   });
   if (result.error) {
     throw new EnvError(`failed to run npm for node ${version}: ${result.error.message}`);

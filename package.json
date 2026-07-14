@@ -1,6 +1,6 @@
 {
   "name": "nvmpin",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Pin globally-installed npm packages to specific nvm-managed Node versions via shims, so CLIs keep working regardless of which node version is active.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   "files": [
     "src",
     "README.md",
-    "LICENSE-MIT"
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18"
