@@ -120,7 +120,7 @@ test('doctor: detects shim dir missing from PATH entirely', async () => {
   }
 });
 
-test('doctor: reports corrupt pins.json', async () => {
+test('doctor: reports corrupt pins.json without touching it — second run still exits 2', async () => {
   const fx = makeFixture(['v18.20.4']);
   try {
     fs.writeFileSync(pinsPath(fx.home), 'garbage{');
@@ -128,6 +128,64 @@ test('doctor: reports corrupt pins.json', async () => {
     const code = await doctor(makeCtx(fx, { ui }));
     assert.equal(code, 2);
     assert.ok(ui.lines.some((l) => l.includes('corrupt')));
+    // doctor must not self-heal: file untouched, no backup created
+    assert.equal(fs.readFileSync(pinsPath(fx.home), 'utf8'), 'garbage{');
+    assert.deepEqual(fs.readdirSync(fx.home).filter((f) => f.includes('corrupt-')), []);
+
+    const code2 = await doctor(makeCtx(fx, { ui: makeUiStub() }));
+    assert.equal(code2, 2, 'second doctor run must still fail');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor: corrupt registry plus existing shims yields BOTH corruption and orphan findings', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    await pinTool(fx);
+    fs.writeFileSync(pinsPath(fx.home), '{ broken');
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui }));
+    assert.equal(code, 2);
+    const out = ui.lines.join('\n');
+    assert.match(out, /corrupt/);
+    assert.match(out, /orphaned shim "tool" \(for tool\)/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor: orphaned shim against a valid empty registry names the package', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    fs.writeFileSync(
+      path.join(shimDir(fx.home), 'lonely'),
+      shimContent('lonely-pkg', 'v18.20.4', '/abs/path', 'cli.js'),
+      { mode: 0o755 }
+    );
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui }));
+    assert.equal(code, 2);
+    assert.ok(ui.lines.some((l) => l.includes('orphaned shim "lonely" (for lonely-pkg)')));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('doctor: orphan finding mentions the pins.json.corrupt-* backup when one exists', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    await pinTool(fx);
+    fs.writeFileSync(pinsPath(fx.home), '{ broken'); // corrupt the registry
+    // write-path recovery (as `add` would do) moves it aside
+    fs.renameSync(pinsPath(fx.home), path.join(fx.home, 'pins.json.corrupt-1234'));
+    const ui = makeUiStub();
+    const code = await doctor(makeCtx(fx, { ui }));
+    assert.equal(code, 2);
+    assert.ok(
+      ui.lines.some((l) => l.includes('pins.json.corrupt-1234')),
+      `expected backup mention, got:\n${ui.lines.join('\n')}`
+    );
   } finally {
     fx.cleanup();
   }

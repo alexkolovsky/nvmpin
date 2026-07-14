@@ -6,8 +6,10 @@ import add from '../src/commands/add.js';
 import remove from '../src/commands/remove.js';
 import list from '../src/commands/list.js';
 import scan from '../src/commands/scan.js';
-import { loadRegistry, shimDir } from '../src/registry.js';
-import { UserError } from '../src/errors.js';
+import doctor from '../src/commands/doctor.js';
+import execCmd from '../src/commands/exec.js';
+import { loadRegistry, shimDir, pinsPath } from '../src/registry.js';
+import { UserError, EnvError } from '../src/errors.js';
 import { makeFixture, installFakePackage, makeUiStub } from './fixtures/helpers.js';
 
 function makeCtx(fx, { flags = {}, installer, ui } = {}) {
@@ -182,6 +184,58 @@ test('list: reports ok / node version missing / broken shim statuses', async () 
     assert.equal(byPkg.good, 'ok');
     assert.equal(byPkg.gone, 'node version missing');
     assert.equal(byPkg.broken, 'broken shim');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('read-only commands on a corrupt registry: exit 2 (EnvError), file untouched, no backup', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    const garbage = '{ definitely not json';
+    fs.writeFileSync(pinsPath(fx.home), garbage);
+    const before = fs.readdirSync(fx.home).sort();
+
+    for (const cmd of [list, scan, execCmd]) {
+      await assert.rejects(
+        () => cmd(makeCtx(fx), ['whatever']),
+        (err) => err instanceof EnvError && /corrupt/.test(err.message) && /doctor/.test(err.hint)
+      );
+    }
+    assert.equal(fs.readFileSync(pinsPath(fx.home), 'utf8'), garbage, 'pins.json byte-identical');
+    assert.deepEqual(fs.readdirSync(fx.home).sort(), before, 'no backup or fresh file written');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('write-path recovery unchanged: corrupt registry + add backs up, succeeds; doctor then reports old shims as orphans', async () => {
+  const fx = makeFixture(['v18.20.4']);
+  try {
+    // a pin from "before the corruption" whose shim will survive the wipe
+    installFakePackage(fx.nvmDir, 'v18.20.4', 'oldtool', { bin: { oldtool: 'cli.js' } });
+    await add(makeCtx(fx, { flags: { node: '18' } }), ['oldtool']);
+    fs.writeFileSync(pinsPath(fx.home), '{ corrupted!!');
+
+    installFakePackage(fx.nvmDir, 'v18.20.4', 'newtool', { bin: { newtool: 'cli.js' } });
+    const ui = makeUiStub();
+    const code = await add(makeCtx(fx, { flags: { node: '18' }, ui }), ['newtool']);
+    assert.equal(code, 0, 'add succeeds after recovery');
+    assert.ok(ui.errors.some((l) => l.includes('corrupt')), 'add warned about recovery');
+    const backups = fs.readdirSync(fx.home).filter((f) => f.startsWith('pins.json.corrupt-'));
+    assert.equal(backups.length, 1, 'backup created');
+
+    const { registry } = loadRegistry(fx.home);
+    assert.deepEqual(Object.keys(registry.pins), ['newtool'], 'old pins gone (wiped by recovery)');
+
+    const docUi = makeUiStub();
+    const docCtx = makeCtx(fx, { ui: docUi });
+    docCtx.env = { PATH: `${shimDir(fx.home)}:/usr/bin` };
+    const docCode = await doctor(docCtx);
+    assert.equal(docCode, 2);
+    const out = docUi.lines.join('\n');
+    assert.match(out, /orphaned shim "oldtool" \(for oldtool\)/);
+    assert.ok(out.includes(backups[0]), 'orphan finding points at the backup');
   } finally {
     fx.cleanup();
   }

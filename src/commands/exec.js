@@ -4,12 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { UserError, EnvError } from '../errors.js';
 import { versionPath, binDir, globalModulesDir } from '../nvm.js';
 import { readBins } from '../shims.js';
-import { loadRegistryWarn, requireArg } from './_util.js';
+import { loadRegistryReadonly, requireArg } from './_util.js';
 
 // Escape hatch: run a pinned package's main bin directly, bypassing shims.
 export default async function exec(ctx, args) {
   const pkg = requireArg(args, 0, '<pkg>');
-  const registry = loadRegistryWarn(ctx);
+  const registry = loadRegistryReadonly(ctx);
   const pin = registry.pins[pkg];
   if (!pin) {
     throw new UserError(`"${pkg}" is not pinned`, 'run `nvmpin list` to see pinned packages.');

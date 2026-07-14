@@ -30,12 +30,14 @@ export function validateRegistry(data) {
 }
 
 // Load pins.json. If the file is missing, returns a fresh registry. If it is
-// corrupt (unparseable or schema-invalid), the broken file is backed up and a
-// fresh registry is returned with `recovered` set so callers can warn.
-export function loadRegistry(home) {
+// corrupt (unparseable or schema-invalid): on the write path (default) the
+// broken file is backed up and a fresh registry is returned with `recovered`
+// set; with { readonly: true } nothing is written to disk — callers get a
+// fresh in-memory registry with `corrupt` set and must not save it.
+export function loadRegistry(home, { readonly = false } = {}) {
   const file = pinsPath(home);
   if (!fs.existsSync(file)) {
-    return { registry: freshRegistry(), recovered: false };
+    return { registry: freshRegistry(), recovered: false, corrupt: false };
   }
   let data;
   try {
@@ -44,11 +46,24 @@ export function loadRegistry(home) {
     data = undefined;
   }
   if (data === undefined || !validateRegistry(data)) {
+    if (readonly) {
+      return { registry: freshRegistry(), recovered: false, corrupt: true };
+    }
     const backup = `${file}.corrupt-${Date.now()}`;
     fs.renameSync(file, backup);
-    return { registry: freshRegistry(), recovered: true, backupPath: backup };
+    return { registry: freshRegistry(), recovered: true, corrupt: true, backupPath: backup };
   }
-  return { registry: data, recovered: false };
+  return { registry: data, recovered: false, corrupt: false };
+}
+
+// Backups left behind by write-path recovery, newest first.
+export function listCorruptBackups(home) {
+  if (!fs.existsSync(home)) return [];
+  return fs
+    .readdirSync(home)
+    .filter((name) => name.startsWith('pins.json.corrupt-'))
+    .sort()
+    .reverse();
 }
 
 // Atomic write: write to a tmp file in the same dir, then rename over.

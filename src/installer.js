@@ -19,14 +19,20 @@ function runNpm(nvmDir, version, npmArgs, { stdio = 'inherit' } = {}) {
   // npm resolves `node` for lifecycle scripts (postinstall, node-gyp) from
   // PATH, not from the node that launched npm — prepend the target version's
   // bin dir so native builds compile against the right ABI.
-  const result = spawnSync(nodeBin, [npmBin, ...npmArgs], {
-    stdio,
-    env: {
-      ...process.env,
-      PATH: `${binDir(nvmDir, version)}:${process.env.PATH || ''}`,
-      npm_config_prefix: undefined,
-    },
-  });
+  const env = {
+    ...process.env,
+    PATH: `${binDir(nvmDir, version)}:${process.env.PATH || ''}`,
+  };
+  // An ambient npm prefix override would redirect the install away from the
+  // target version's tree, leaving shims pointing at nothing. npm reads
+  // npm_config_prefix from env case-insensitively and also honors exact
+  // PREFIX; strip all of them (matching nvm's own stance) instead of
+  // passing --prefix.
+  for (const key of Object.keys(env)) {
+    if (/^npm_config_prefix$/i.test(key)) delete env[key];
+  }
+  delete env.PREFIX;
+  const result = spawnSync(nodeBin, [npmBin, ...npmArgs], { stdio, env });
   if (result.error) {
     throw new EnvError(`failed to run npm for node ${version}: ${result.error.message}`);
   }

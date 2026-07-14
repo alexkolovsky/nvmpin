@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { versionsDir, versionPath } from '../nvm.js';
-import { shimDir, loadRegistry } from '../registry.js';
+import { shimDir, pinsPath, loadRegistry, listCorruptBackups } from '../registry.js';
 import { listShims, parseShim } from '../shims.js';
 
 // Doctor exits 0 when healthy, 2 when problems are found (environment
@@ -34,12 +34,14 @@ export default async function doctor(ctx) {
     );
   }
 
-  // 3. pins.json parses and is schema-valid
-  const { registry, recovered, backupPath } = loadRegistry(ctx.home);
-  if (recovered) {
+  // 3. pins.json parses and is schema-valid. Doctor is read-only: a corrupt
+  // file is reported as a finding (and the remaining checks run against an
+  // in-memory empty registry) — never backed up or wiped from here.
+  const { registry, corrupt } = loadRegistry(ctx.home, { readonly: true });
+  if (corrupt) {
     problem(
-      `pins.json was corrupt (backed up to ${backupPath}); all pins were lost`,
-      're-pin your packages with `nvmpin add`, or restore the backup by hand.'
+      `pins.json is corrupt or schema-invalid: ${pinsPath(ctx.home)}`,
+      'fix the file by hand, or run any write command (add/remove/move) to back it up and start fresh.'
     );
   }
 
@@ -71,13 +73,19 @@ export default async function doctor(ctx) {
     }
   }
 
-  // 5. orphaned shims: nvmpin shim files no registry entry claims
+  // 5. orphaned shims: nvmpin shim files no registry entry claims. After a
+  // write-path corrupt-registry recovery every shim lands here — if a
+  // pins.json.corrupt-* backup exists, point at it.
+  const backups = listCorruptBackups(ctx.home);
+  const backupHint = backups.length
+    ? ` A registry backup exists (${path.join(ctx.home, backups[0])}) — restore it over pins.json to recover the pin, or re-add the package.`
+    : ' Delete the shim, or re-add the package.';
   for (const name of listShims(ctx.home)) {
     if (!shimsSeen.has(name)) {
       const parsed = parseShim(path.join(dir, name));
       problem(
         `orphaned shim "${name}"${parsed ? ` (for ${parsed.pkg})` : ''} has no registry entry`,
-        `delete ${path.join(dir, name)}, or re-add the package.`
+        `${path.join(dir, name)} is not tracked.${backupHint}`
       );
     }
   }

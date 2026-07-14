@@ -3,7 +3,7 @@ import path from 'node:path';
 import { versionPath } from '../nvm.js';
 import { shimDir } from '../registry.js';
 import { parseShim } from '../shims.js';
-import { loadRegistryWarn } from './_util.js';
+import { loadRegistryReadonly } from './_util.js';
 
 export function pinStatus(ctx, pkg, pin) {
   if (!fs.existsSync(versionPath(ctx.nvmDir, pin.node))) return 'node version missing';
@@ -18,7 +18,7 @@ export function pinStatus(ctx, pkg, pin) {
 
 export default async function list(ctx) {
   const { ui } = ctx;
-  const registry = loadRegistryWarn(ctx);
+  const registry = loadRegistryReadonly(ctx);
   const entries = Object.entries(registry.pins).sort(([a], [b]) => a.localeCompare(b));
 
   if (ctx.flags.json) {

@@ -1,12 +1,12 @@
 import { listVersions, listGlobalPackages } from '../nvm.js';
-import { loadRegistryWarn } from './_util.js';
+import { loadRegistryReadonly } from './_util.js';
 
 // Packages that ship with node itself — not pin candidates.
 const BUNDLED = new Set(['npm', 'corepack']);
 
 export default async function scan(ctx) {
   const { ui } = ctx;
-  const registry = loadRegistryWarn(ctx);
+  const registry = loadRegistryReadonly(ctx);
   const versions = listVersions(ctx.nvmDir);
 
   const byPkg = new Map(); // pkg -> [versions it is installed in]
