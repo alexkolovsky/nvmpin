@@ -53,16 +53,33 @@ $ nvmpin doctor                        # verify PATH order, shims, registry
 
 | Command | What it does |
 | --- | --- |
-| `nvmpin setup` | Create dirs, print/append the shell rc PATH snippet. Idempotent. |
-| `nvmpin add <pkg>[@<ver>] --node <v>` | Install the package under that node version (if not already there), write shims for every bin it declares, record the pin. If `--node` is omitted, nvmpin suggests an installed version satisfying the package's `engines.node`, else errors listing your installed versions. Conflicting `engines.node` produces a warning, not a failure. |
+| `nvmpin setup` | Create dirs and print the shell rc PATH snippet. Offers to append it for bash and zsh; other shells get the snippet with a note to add the equivalent manually. Idempotent. |
+| `nvmpin add <pkg>[@<ver>] --node <v>` | Install the package under that node version (if not already there), write shims for every bin it declares, record the pin. If `--node` is omitted, nvmpin suggests a version from the package's `engines.node` — this only works when the package is already installed under *some* nvm version (reading `engines` without installing would need a registry call); otherwise it errors listing your installed versions. Conflicting `engines.node` produces a warning, not a failure. Re-pinning an already-pinned package to a *different* version is rejected — use `move`. |
 | `nvmpin remove <pkg> [--uninstall]` | Delete the shims and the registry entry. `--uninstall` also removes the package from the node version's global tree. |
-| `nvmpin move <pkg> --node <v>` | Full reinstall into the new version (never a re-point — native modules are compiled per node ABI), rewrite shims, update the registry. Rolls back on install failure. |
+| `nvmpin move <pkg> --node <v>` | Full reinstall into the new version (never a re-point — native modules are compiled per node ABI), rewrite shims, update the registry. Keeps the currently-installed package version (`pkg@X.Y.Z`), not npm's latest. Rolls back registry and shims on failure. |
 | `nvmpin list [--json]` | Table of pins: package, node version, bins, status (`ok` / `broken shim` / `node version missing`). |
 | `nvmpin scan [--json]` | Walk all installed nvm versions' global trees; report each package, which versions it exists in, duplicates, and unpinned candidates (npm/corepack excluded). |
 | `nvmpin exec <pkg> -- <args...>` | Run a pinned package's main bin directly with its pinned node — an escape hatch that bypasses PATH/shims. |
 | `nvmpin doctor` | Verify: shim dir on PATH *before* all nvm bin dirs, every pinned node version still installed, shims match the registry (no orphans, no drift), pins.json valid. Exits non-zero with fix suggestions when problems are found. |
 
-**Global flags:** `--yes` (skip confirmations), `--no-color` (also respects `NO_COLOR`), `--json` (on `list` and `scan`).
+**Global flags:** `--yes` (skip confirmations), `--no-color` (also respects `NO_COLOR`), `--json` (on `list` and `scan`), `--help`/`-h`.
+
+**JSON output:** `list --json` prints an array of pin objects; `scan --json` prints an object with the installed versions and per-package report:
+
+```jsonc
+// nvmpin list --json
+[
+  { "package": "typescript", "node": "v18.20.4", "bins": ["tsc", "tsserver"],
+    "pinnedAt": "2026-07-15T10:00:00.000Z", "status": "ok" }
+]
+
+// nvmpin scan --json
+{ "nodeVersions": ["v20.19.5", "v18.20.4"],
+  "packages": [
+    { "package": "typescript", "versions": ["v18.20.4", "v20.19.5"],
+      "duplicate": true, "pinned": "v18.20.4" }
+  ] }
+```
 
 **Node version syntax:** `18`, `18.20`, `v18.20.4` — resolved to the newest installed match. nvm aliases (`lts/hydrogen`, `stable`, `default`, …) are not supported; pass a number.
 
@@ -90,13 +107,15 @@ exec "/Users/you/.nvm/versions/node/v18.20.4/bin/node" "/Users/you/.nvm/versions
 
 Because `~/.nvmpin/bin` sits ahead of nvm's bin dir in PATH, the shim wins no matter which node version is active.
 
+**If `pins.json` gets corrupted:** write commands (`add`, `remove`, `move`) back it up to `pins.json.corrupt-<timestamp>`, warn, and start fresh; read-only commands (`list`, `scan`, `exec`) refuse to touch it and exit `2` pointing at `doctor`, which reports the corruption (and any now-orphaned shims, with a pointer to the backup) without modifying anything.
+
 ## Limitations
 
 - **POSIX only.** macOS and Linux with bash/zsh shims. No Windows support in v1.
 - **No nvm aliases.** `--node lts/hydrogen` is rejected; use a numeric version. Aliases move over time, which would silently break pins.
 - **Native modules require `nvmpin move`.** Switching a pin to a new node version is always a full reinstall, because compiled addons are ABI-specific. There is no fast re-point.
 - **Deleting a node version breaks its pins.** `nvmpin doctor` and `nvmpin list` will tell you; fix with `nvmpin move`.
-- **Common `engines.node` ranges only.** Exotic semver ranges in `engines.node` are skipped rather than misjudged.
+- **Common `engines.node` ranges only.** Exotic semver ranges in `engines.node` are never guessed at: they're skipped on the suggestion path, and produce a one-line "couldn't verify" warning when you passed `--node` explicitly.
 
 ## Development
 

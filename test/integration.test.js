@@ -139,13 +139,27 @@ test(
   () => {
     const sb = makeSandbox();
     try {
+      // Retry config passed alongside the sentinel registry: keeps the test
+      // fast AND proves two more npm_config_* values reach real npm.
+      const started = Date.now();
       assert.throws(
         () =>
-          withEnv({ HOME: sb.home, npm_config_registry: 'http://127.0.0.1:9/' }, () =>
-            createInstaller().install(sb.nvmDir, sb.version, `${PKG}@${PKG_VERSION}`)
+          withEnv(
+            {
+              HOME: sb.home,
+              npm_config_registry: 'http://127.0.0.1:9/',
+              npm_config_fetch_retries: '0',
+              npm_config_fetch_retry_maxtimeout: '1000',
+            },
+            () => createInstaller().install(sb.nvmDir, sb.version, `${PKG}@${PKG_VERSION}`)
           ),
         /npm install .* failed/,
         'install must fail — proving the registry value reached real npm instead of being stripped'
+      );
+      const elapsed = Date.now() - started;
+      assert.ok(
+        elapsed < 30_000,
+        `expected fast failure with retries disabled (got ${elapsed}ms) — retry config may not be reaching npm`
       );
       assert.ok(
         !fs.existsSync(path.join(sb.vp, 'lib', 'node_modules', PKG)),

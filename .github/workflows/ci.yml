@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    # Offline unit suite; the real-npm integration tests self-skip
+    # (NVMPIN_INTEGRATION is not set here) and must show as skipped.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18.x
+          - os: ubuntu-latest
+            node: 20.x
+          - os: ubuntu-latest
+            node: 22.x
+          - os: macos-latest
+            node: 22.x
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm test
+
+  integration:
+    # Re-verifies the npm-side contract (DECISIONS.md #17) against the REAL
+    # public npm registry — network-dependent, so it runs only on demand
+    # (workflow_dispatch) and on release tags, not on every push.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: npm ci
+      - run: npm test
+        env:
+          NVMPIN_INTEGRATION: '1'

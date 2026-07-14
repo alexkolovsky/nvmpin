@@ -1,7 +1,15 @@
 {
   "name": "nvmpin",
   "version": "0.1.0",
-  "description": "Pin globally-installed npm packages to specific nvm-managed Node versions via shims, so CLIs keep working regardless of which node version is active.",
+  "description": "Pin global npm packages to specific nvm node versions via shims — global CLIs keep working across nvm version switches.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexkolovsky/nvmpin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexkolovsky/nvmpin/issues"
+  },
+  "homepage": "https://github.com/alexkolovsky/nvmpin#readme",
   "type": "module",
   "bin": {
     "nvmpin": "src/cli.js"
@@ -21,12 +29,13 @@
   },
   "keywords": [
     "nvm",
-    "node",
-    "version",
-    "global",
-    "cli",
+    "node-version",
+    "global-packages",
     "shim",
-    "pin"
+    "cli",
+    "version-manager",
+    "pin",
+    "node"
   ],
   "author": "Alex Kolovskiy",
   "license": "MIT"
