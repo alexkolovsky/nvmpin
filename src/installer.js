@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { UserError, EnvError } from './errors.js';
-import { binDir, globalModulesDir } from './nvm.js';
+import { binDir, globalModulesDir, versionPath } from './nvm.js';
 
 // Runs the target version's own npm with the target version's own node —
 // never the ambient npm — so packages land in that version's global tree
@@ -23,14 +23,20 @@ function runNpm(nvmDir, version, npmArgs, { stdio = 'inherit' } = {}) {
     ...process.env,
     PATH: `${binDir(nvmDir, version)}:${process.env.PATH || ''}`,
   };
-  // An ambient npm prefix override would redirect the install away from the
-  // target version's tree, leaving shims pointing at nothing. npm reads
-  // npm_config_prefix from env case-insensitively and also honors exact
-  // PREFIX; strip all of them (matching nvm's own stance) instead of
-  // passing --prefix.
+  // A prefix override — env var in any casing, or prefix= in an npmrc —
+  // would redirect the install away from the target version's tree, leaving
+  // shims pointing at nothing. Assert the right prefix instead of hunting
+  // for wrong ones: env config outranks every npmrc layer, so setting
+  // npm_config_prefix to the version dir wins over all of them. npm resolves
+  // conflicting env casings by last-in-env-order, so delete existing prefix
+  // keys first to guarantee ours is last. All other npm_config_* (registry,
+  // proxy, auth tokens) must pass through untouched.
   for (const key of Object.keys(env)) {
     if (/^npm_config_prefix$/i.test(key)) delete env[key];
   }
+  env.npm_config_prefix = versionPath(nvmDir, version);
+  // PREFIX (exact name) is also honored by npm but has no correct value to
+  // assert here — only a wrong one to remove.
   delete env.PREFIX;
   const result = spawnSync(nodeBin, [npmBin, ...npmArgs], { stdio, env });
   if (result.error) {
