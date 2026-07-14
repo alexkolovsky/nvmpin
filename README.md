@@ -98,6 +98,16 @@ Because `~/.nvmpin/bin` sits ahead of nvm's bin dir in PATH, the shim wins no ma
 - **Deleting a node version breaks its pins.** `nvmpin doctor` and `nvmpin list` will tell you; fix with `nvmpin move`.
 - **Common `engines.node` ranges only.** Exotic semver ranges in `engines.node` are skipped rather than misjudged.
 
+## Development
+
+```console
+$ npm test                          # unit suite: offline, stub-based, fast
+$ NVMPIN_INTEGRATION=1 npm test     # also runs the real-npm integration test
+$ npm run test:integration          # same thing, spelled out
+```
+
+The integration test installs a small pinned package from the **real npm registry** into a tmp-dir sandbox to re-verify the npm behavior nvmpin's installer depends on (env-prefix precedence, config passthrough). It needs network access and takes a minute or two; it runs automatically on `npm publish` via `prepublishOnly` and shows as *skipped* in ordinary test runs.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

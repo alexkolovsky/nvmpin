@@ -15,7 +15,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.js'"
+    "test": "node --test 'test/*.test.js'",
+    "test:integration": "NVMPIN_INTEGRATION=1 node --test 'test/*.test.js'",
+    "prepublishOnly": "npm run test && npm run test:integration"
   },
   "keywords": [
     "nvm",
